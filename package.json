@@ -1,0 +1,14 @@
+{
+  "name": "sg-bot-parser",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.14.1",
+    "axios": "^1.13.5",
+    "dotenv": "^17.2.4",
+    "express": "^4.19.2"
+  }
+}
