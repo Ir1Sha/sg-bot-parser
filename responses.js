@@ -12,6 +12,13 @@ export function manualCheckMessage() {
   );
 }
 
+export function noSuppressionsManualCheckMessage() {
+  return (
+    "No suppressions found for this recipient in SendGrid, but the email was not delivered.\n" +
+    "Manual check required."
+  );
+}
+
 export function spamRemovedMessage() {
   return (
     "This email was not sent because the recipient previously marked your messages as spam.\n" +

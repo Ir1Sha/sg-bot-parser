@@ -7,6 +7,7 @@ import {
   mailboxFullRemovedMessage,
   providerBlockRemovedMessage,
   bounceRemovedMessage,
+  noSuppressionsManualCheckMessage,
 } from "../responses.js";
 import {
   normalizeEmail,
@@ -74,10 +75,10 @@ export function registerSlackEventsRoute(app, deps) {
         }
 
         if (!bounce && !block && !global && !vi && !spam) {
-          await sendSlackReply(evt, manualCheckMessage());
+          markProcessed(key);
+          await sendSlackReply(evt, noSuppressionsManualCheckMessage());
           return;
         }
-
         let removedSomething = false;
 
         if (spam) {
