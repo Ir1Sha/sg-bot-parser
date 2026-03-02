@@ -14,7 +14,7 @@ export function manualCheckMessage() {
 
 export function noSuppressionsManualCheckMessage() {
   return (
-    "No suppressions found for this recipient in SendGrid, but the email was not delivered.\n" +
+    "No suppressions found for this recipient in SendGrid.\n" +
     "Manual check required."
   );
 }
