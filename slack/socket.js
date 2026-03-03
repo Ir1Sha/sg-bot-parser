@@ -71,7 +71,6 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
       }
 
       if (!bounce && !block && !global && !vi && !spam) {
-        markProcessed(key);
         await sendSlackReply(evt, noSuppressionsManualCheckMessage());
         return;
       }
