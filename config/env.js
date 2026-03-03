@@ -19,6 +19,12 @@ export function loadEnvOrExit() {
     process.exit(1);
   }
 
+  const SLACK_APP_TOKEN = (process.env.SLACK_APP_TOKEN || "").trim();
+  if (!SLACK_APP_TOKEN) {
+    console.error("ERROR: SLACK_APP_TOKEN is missing in .env");
+    process.exit(1);
+  }
+
   const SLACK_NOTIFY_USER_ID = (process.env.SLACK_NOTIFY_USER_ID || "").trim();
   if (!SLACK_NOTIFY_USER_ID) {
     console.error("ERROR: SLACK_NOTIFY_USER_ID is missing in .env");
@@ -31,6 +37,7 @@ export function loadEnvOrExit() {
     SENDGRID_API_KEY,
     VERY_IMPORTANT_GROUP_ID,
     SLACK_BOT_TOKEN,
+    SLACK_APP_TOKEN,
     SLACK_NOTIFY_USER_ID,
     PORT,
   };

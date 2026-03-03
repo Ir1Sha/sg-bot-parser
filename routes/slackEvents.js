@@ -1,3 +1,5 @@
+import { App } from "@slack/bolt";
+
 import { parseSlackText } from "../parser.js";
 import {
   unsubRemovedMessage,
@@ -15,137 +17,138 @@ import {
   markProcessed,
 } from "../utils/cooldown.js";
 
-export function registerSlackEventsRoute(app, deps) {
-  const { sendSlackReply, sgOps } = deps;
+export function startSocketMode({ sgOps, sendSlackReply, env }) {
+  const bolt = new App({
+    token: env.SLACK_BOT_TOKEN,
+    appToken: env.SLACK_APP_TOKEN,
+    socketMode: true,
+  });
 
-  app.post("/slack/events", (req, res) => {
-    const body = req.body;
+  // Socket Mode message handler (same logic as routes/slackEvents.js)
+  bolt.message(async ({ message }) => {
+    // ignore non-text / bot / subtype messages
+    if (!message || !message.text) return;
+    if (message.subtype) return;
+    if (message.bot_id) return;
 
-    if (body?.type === "url_verification") {
-      return res.json({ challenge: body.challenge });
-    }
-
-    const evt = body?.event;
-
-    if (!evt || evt.type !== "message" || evt.subtype || evt.bot_id) {
-      return res.sendStatus(200);
-    }
-
-    const parsed = parseSlackText(evt.text || "");
+    const parsed = parseSlackText(message.text || "");
     const email = parsed?.email;
-    if (!email) return res.sendStatus(200);
+    if (!email) return;
 
-    res.sendStatus(200);
+    // адаптер: під твою існуючу sendSlackReply(evt, msg)
+    const evt = { channel: message.channel, ts: message.ts };
+    const key = normalizeEmail(email);
 
-    if (req.headers["x-slack-retry-num"]) return;
+    try {
+      if (isInCooldown(key)) {
+        await sendSlackReply(evt, manualCheckMessage());
+        return;
+      }
 
-    void (async () => {
-      const key = normalizeEmail(email);
+      const bounce = await sgOps.getBounceDetails(email);
+      const block = await sgOps.getBlockDetails(email);
+      const vi = await sgOps.isVeryImportantUnsubscribed(email);
+      const globalSources = await sgOps.getGlobalSources(email);
+      const global = globalSources.any;
+      const spam = await sgOps.isSpamReported(email);
+      const invalid = await sgOps.isInvalidSuppressed(email);
 
-      try {
-        if (isInCooldown(key)) {
+      console.log("DIAG:", {
+        email,
+        bounce: bounce?.reason || null,
+        block: block?.reason || null,
+        global_sources: globalSources,
+        global_unsubscribed: global,
+        very_important_group_unsubscribed: vi,
+        spam_reported: spam,
+        invalid_suppressed: invalid,
+        in_cooldown: isInCooldown(key),
+      });
+
+      if (invalid) {
+        markProcessed(key);
+        await sendSlackReply(evt, invalidManualCheckMessage());
+        return;
+      }
+
+      // ✅ твій “немає suppressions → manual check”
+      if (!bounce && !block && !global && !vi && !spam) {
+        markProcessed(key);
+        await sendSlackReply(evt, noSuppressionsManualCheckMessage());
+        return;
+      }
+
+      let removedSomething = false;
+
+      if (spam) {
+        await sgOps.deleteSpamReport(email);
+        removedSomething = true;
+      }
+
+      if (global) {
+        await sgOps.deleteGlobalUnsubscribe(email);
+        removedSomething = true;
+      }
+
+      if (vi) {
+        await sgOps.deleteVeryImportantUnsubscribe(email);
+        removedSomething = true;
+      }
+
+      if (bounce) {
+        await sgOps.deleteBounce(email);
+        removedSomething = true;
+      }
+
+      if (block) {
+        await sgOps.deleteBlock(email);
+        removedSomething = true;
+      }
+
+      if (global) {
+        const globalAfter = await sgOps.getGlobalSources(email);
+        console.log("GLOBAL AFTER DELETE:", globalAfter);
+
+        if (globalAfter.any) {
+          markProcessed(key);
           await sendSlackReply(evt, manualCheckMessage());
           return;
         }
+      }
 
-        const bounce = await sgOps.getBounceDetails(email);
-        const block = await sgOps.getBlockDetails(email);
-        const vi = await sgOps.isVeryImportantUnsubscribed(email);
-        const globalSources = await sgOps.getGlobalSources(email);
-        const global = globalSources.any;
-        const spam = await sgOps.isSpamReported(email);
-        const invalid = await sgOps.isInvalidSuppressed(email);
+      if (removedSomething) {
+        markProcessed(key);
 
-        console.log("DIAG:", {
-          email,
-          bounce: bounce?.reason || null,
-          block: block?.reason || null,
-          global_sources: globalSources,
-          global_unsubscribed: global,
-          very_important_group_unsubscribed: vi,
-          spam_reported: spam,
-          invalid_suppressed: invalid,
-          in_cooldown: isInCooldown(key),
-        });
-
-        if (invalid) {
-          markProcessed(key);
-          await sendSlackReply(evt, invalidManualCheckMessage());
-          return;
-        }
-
-        if (!bounce && !block && !global && !vi && !spam) {
-          markProcessed(key);
-          await sendSlackReply(evt, noSuppressionsManualCheckMessage());
-          return;
-        }
-        let removedSomething = false;
+        let msg = unsubRemovedMessage();
 
         if (spam) {
-          await sgOps.deleteSpamReport(email);
-          removedSomething = true;
+          msg = spamRemovedMessage();
+        } else if (bounce) {
+          msg = sgOps.isMailboxFull(bounce)
+            ? mailboxFullRemovedMessage(bounce)
+            : bounceRemovedMessage(bounce);
+        } else if (block) {
+          msg = sgOps.isMailboxFull(block)
+            ? mailboxFullRemovedMessage(block)
+            : providerBlockRemovedMessage(block);
         }
 
-        if (global) {
-          await sgOps.deleteGlobalUnsubscribe(email);
-          removedSomething = true;
-        }
-
-        if (vi) {
-          await sgOps.deleteVeryImportantUnsubscribe(email);
-          removedSomething = true;
-        }
-
-        if (bounce) {
-          await sgOps.deleteBounce(email);
-          removedSomething = true;
-        }
-
-        if (block) {
-          await sgOps.deleteBlock(email);
-          removedSomething = true;
-        }
-
-        if (global) {
-          const globalAfter = await sgOps.getGlobalSources(email);
-          console.log("GLOBAL AFTER DELETE:", globalAfter);
-
-          if (globalAfter.any) {
-            markProcessed(key);
-            await sendSlackReply(evt, manualCheckMessage());
-            return;
-          }
-        }
-
-        if (removedSomething) {
-          markProcessed(key);
-
-          let msg = unsubRemovedMessage();
-
-          if (spam) {
-            msg = spamRemovedMessage();
-          } else if (bounce) {
-            msg = sgOps.isMailboxFull(bounce)
-              ? mailboxFullRemovedMessage(bounce)
-              : bounceRemovedMessage(bounce);
-          } else if (block) {
-            msg = sgOps.isMailboxFull(block)
-              ? mailboxFullRemovedMessage(block)
-              : providerBlockRemovedMessage(block);
-          }
-
-          await sendSlackReply(evt, msg);
-        }
-
-        await new Promise((r) => setTimeout(r, 1500));
-      } catch (err) {
-        const status = err?.response?.status;
-        const data = err?.response?.data || err.message;
-        const method = err?.config?.method?.toUpperCase();
-        const url = err?.config?.url;
-
-        console.error("SENDGRID CHECK FAILED:", { status, method, url, data });
+        await sendSlackReply(evt, msg);
       }
-    })();
+
+      await new Promise((r) => setTimeout(r, 1500));
+    } catch (err) {
+      const status = err?.response?.status;
+      const data = err?.response?.data || err.message;
+      const method = err?.config?.method?.toUpperCase();
+      const url = err?.config?.url;
+
+      console.error("SENDGRID CHECK FAILED:", { status, method, url, data });
+    }
   });
+
+  (async () => {
+    await bolt.start();
+    console.log("⚡ Slack Socket Mode started");
+  })();
 }

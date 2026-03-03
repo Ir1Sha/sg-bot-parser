@@ -5,7 +5,7 @@ import { loadEnvOrExit } from "./config/env.js";
 import { createSendgridClient } from "./sendgrid/client.js";
 import { createSendgridSuppressions } from "./sendgrid/suppressions.js";
 import { createSlackClient } from "./slack/client.js";
-import { registerSlackEventsRoute } from "./routes/slackEvents.js";
+import { startSocketMode } from "./slack/socket.js";
 
 const env = loadEnvOrExit();
 
@@ -21,10 +21,11 @@ const { sendSlackReply } = createSlackClient({
 });
 
 const app = express();
-app.use(express.json());
 
-registerSlackEventsRoute(app, { sendSlackReply, sgOps });
+app.get("/", (_req, res) => res.send("ok"));
 
 app.listen(env.PORT, () => {
   console.log(`Server listening on http://localhost:${env.PORT}`);
 });
+
+startSocketMode({ sgOps, sendSlackReply, env });
