@@ -1,6 +1,6 @@
-import { App } from "@slack/bolt";
+import { App } from '@slack/bolt';
 
-import { parseSlackText } from "../parser.js";
+import { parseSlackText } from '../parser.js';
 import {
   unsubRemovedMessage,
   manualCheckMessage,
@@ -10,12 +10,12 @@ import {
   providerBlockRemovedMessage,
   bounceRemovedMessage,
   noSuppressionsManualCheckMessage,
-} from "../responses.js";
+} from '../responses.js';
 import {
   normalizeEmail,
   isInCooldown,
   markProcessed,
-} from "../utils/cooldown.js";
+} from '../utils/cooldown.js';
 
 export function startSocketMode({ sgOps, sendSlackReply, env }) {
   const app = new App({
@@ -26,18 +26,29 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
 
   app.message(async ({ message }) => {
     try {
+      console.log('SLACK EVENT:', {
+        ts: message?.ts,
+        thread_ts: message?.thread_ts,
+        bot_id: message?.bot_id,
+        subtype: message?.subtype,
+        user: message?.user,
+      });
       // ignore non-text, subtype, bot messages
       if (!message?.text) return;
       if (message.subtype) return;
       if (message.bot_id) return;
+      if (message.thread_ts) return;
 
-      const parsed = parseSlackText(message.text || "");
+      const parsed = parseSlackText(message.text || '');
       const email = parsed?.email;
       if (!email) return;
+      const isWithdrawal = /no email to confirm funds withdrawal/i.test(
+        message.text || '',
+      );
 
       // adapter to match your sendSlackReply(evt, msg)
       const evt = { channel: message.channel, ts: message.ts };
-      const key = normalizeEmail(email);
+      const key = `${normalizeEmail(email)}:${isWithdrawal ? 'withdrawal' : 'default'}`;
 
       if (isInCooldown(key)) {
         await sendSlackReply(evt, manualCheckMessage());
@@ -46,19 +57,22 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
 
       const bounce = await sgOps.getBounceDetails(email);
       const block = await sgOps.getBlockDetails(email);
-      const vi = await sgOps.isVeryImportantUnsubscribed(email);
+      const vi = isWithdrawal
+        ? await sgOps.isWithdrawalUnsubscribed(email)
+        : await sgOps.isVeryImportantUnsubscribed(email);
       const globalSources = await sgOps.getGlobalSources(email);
       const global = globalSources.any;
       const spam = await sgOps.isSpamReported(email);
       const invalid = await sgOps.isInvalidSuppressed(email);
 
-      console.log("DIAG:", {
+      console.log('DIAG:', {
         email,
         bounce: bounce?.reason || null,
         block: block?.reason || null,
         global_sources: globalSources,
         global_unsubscribed: global,
-        very_important_group_unsubscribed: vi,
+        suppression_group: isWithdrawal ? 'withdrawal' : 'very_important',
+        group_unsubscribed: vi,
         spam_reported: spam,
         invalid_suppressed: invalid,
         in_cooldown: isInCooldown(key),
@@ -88,7 +102,12 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
       }
 
       if (vi) {
-        await sgOps.deleteVeryImportantUnsubscribe(email);
+        if (isWithdrawal) {
+          await sgOps.deleteWithdrawalUnsubscribe(email);
+        } else {
+          await sgOps.deleteVeryImportantUnsubscribe(email);
+        }
+
         removedSomething = true;
       }
 
@@ -104,7 +123,7 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
 
       if (global) {
         const globalAfter = await sgOps.getGlobalSources(email);
-        console.log("GLOBAL AFTER DELETE:", globalAfter);
+        console.log('GLOBAL AFTER DELETE:', globalAfter);
 
         if (globalAfter.any) {
           markProcessed(key);
@@ -135,12 +154,12 @@ export function startSocketMode({ sgOps, sendSlackReply, env }) {
 
       await new Promise((r) => setTimeout(r, 1500));
     } catch (err) {
-      console.error("Socket handler error:", err?.response?.data || err);
+      console.error('Socket handler error:', err?.response?.data || err);
     }
   });
 
   (async () => {
     await app.start();
-    console.log("⚡ Slack Socket Mode started");
+    console.log('⚡ Slack Socket Mode started');
   })();
 }

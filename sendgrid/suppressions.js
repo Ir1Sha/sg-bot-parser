@@ -1,4 +1,4 @@
-import { normalizeEmail } from "../utils/cooldown.js";
+import { normalizeEmail } from '../utils/cooldown.js';
 
 export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
   // ---- GLOBAL ----
@@ -12,7 +12,7 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     try {
       const r = await sg.get(`/suppression/unsubscribes/${enc}`);
       if (Array.isArray(r.data)) legacy = r.data.length > 0;
-      else if (r.data && typeof r.data === "object")
+      else if (r.data && typeof r.data === 'object')
         legacy = Object.keys(r.data).length > 0;
       else legacy = Boolean(r.data);
     } catch (err) {
@@ -38,24 +38,24 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     // legacy
     try {
       const r1 = await sg.delete(`/suppression/unsubscribes/${enc}`);
-      console.log("DELETE legacy global:", r1.status);
+      console.log('DELETE legacy global:', r1.status);
     } catch (err) {
       console.log(
-        "DELETE legacy global ERROR:",
+        'DELETE legacy global ERROR:',
         err?.response?.status,
-        err?.response?.data || err.message
+        err?.response?.data || err.message,
       );
     }
 
     // ASM
     try {
       const r2 = await sg.delete(`/asm/suppressions/global/${enc}`);
-      console.log("DELETE asm global:", r2.status);
+      console.log('DELETE asm global:', r2.status);
     } catch (err) {
       console.log(
-        "DELETE asm global ERROR:",
+        'DELETE asm global ERROR:',
         err?.response?.status,
-        err?.response?.data || err.message
+        err?.response?.data || err.message,
       );
     }
   }
@@ -67,7 +67,7 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     try {
       const r = await sg.get(`/suppression/spam_reports/${enc}`);
       if (Array.isArray(r.data)) return r.data.length > 0;
-      if (r.data && typeof r.data === "object")
+      if (r.data && typeof r.data === 'object')
         return Object.keys(r.data).length > 0;
       return Boolean(r.data);
     } catch (err) {
@@ -87,7 +87,7 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     try {
       const r = await sg.get(`/suppression/invalid_emails/${enc}`);
       if (Array.isArray(r.data)) return r.data.length > 0;
-      if (r.data && typeof r.data === "object")
+      if (r.data && typeof r.data === 'object')
         return Object.keys(r.data).length > 0;
       return Boolean(r.data);
     } catch (err) {
@@ -132,31 +132,52 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     await sg.delete(`/suppression/blocks/${encodeURIComponent(email)}`);
   }
 
-  function isMailboxFull(objOrReason = "") {
+  function isMailboxFull(objOrReason = '') {
     const reason =
-      typeof objOrReason === "string"
+      typeof objOrReason === 'string'
         ? objOrReason
-        : String(objOrReason?.reason || "");
+        : String(objOrReason?.reason || '');
 
     const status =
-      typeof objOrReason === "string" ? "" : String(objOrReason?.status || "");
+      typeof objOrReason === 'string' ? '' : String(objOrReason?.status || '');
 
     const r = reason.toLowerCase();
     const s = status.trim();
 
-    if (s.startsWith("4.2.2") || s.startsWith("5.2.2")) return true;
+    if (s.startsWith('4.2.2') || s.startsWith('5.2.2')) return true;
 
     return (
-      r.includes("over quota") ||
-      r.includes("out of storage") ||
-      r.includes("mailbox full") ||
-      r.includes("full mailbox") ||
-      r.includes("mailbox is full") ||
-      r.includes("quota exceeded") ||
-      r.includes("insufficient storage") ||
-      r.includes("storage") ||
-      r.includes("quota")
+      r.includes('over quota') ||
+      r.includes('out of storage') ||
+      r.includes('mailbox full') ||
+      r.includes('full mailbox') ||
+      r.includes('mailbox is full') ||
+      r.includes('quota exceeded') ||
+      r.includes('insufficient storage') ||
+      r.includes('storage') ||
+      r.includes('quota')
     );
+  }
+
+  // ---- Withdrawal group suppression ----
+  const WITHDRAWAL_GROUP_ID = 127601;
+
+  async function isWithdrawalUnsubscribed(email) {
+    const target = normalizeEmail(email);
+
+    const r = await sg.get(`/asm/groups/${WITHDRAWAL_GROUP_ID}/suppressions`);
+
+    if (!Array.isArray(r.data)) return false;
+
+    return r.data.some((e) => normalizeEmail(e) === target);
+  }
+
+  async function deleteWithdrawalUnsubscribe(email) {
+    const r = await sg.delete(
+      `/asm/groups/${WITHDRAWAL_GROUP_ID}/suppressions/${encodeURIComponent(email)}`,
+    );
+
+    console.log('DELETE withdrawal group:', r.status);
   }
 
   // ---- VI group suppression ----
@@ -164,7 +185,7 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
     const target = normalizeEmail(email);
 
     const r = await sg.get(
-      `/asm/groups/${VERY_IMPORTANT_GROUP_ID}/suppressions`
+      `/asm/groups/${VERY_IMPORTANT_GROUP_ID}/suppressions`,
     );
     if (!Array.isArray(r.data)) return false;
 
@@ -174,10 +195,10 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
   async function deleteVeryImportantUnsubscribe(email) {
     const r = await sg.delete(
       `/asm/groups/${VERY_IMPORTANT_GROUP_ID}/suppressions/${encodeURIComponent(
-        email
-      )}`
+        email,
+      )}`,
     );
-    console.log("DELETE VI group:", r.status);
+    console.log('DELETE VI group:', r.status);
   }
 
   return {
@@ -199,5 +220,8 @@ export function createSendgridSuppressions({ sg, VERY_IMPORTANT_GROUP_ID }) {
 
     isVeryImportantUnsubscribed,
     deleteVeryImportantUnsubscribe,
+
+    isWithdrawalUnsubscribed,
+    deleteWithdrawalUnsubscribe,
   };
 }
